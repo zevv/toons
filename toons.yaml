@@ -1,0 +1,18 @@
+-
+    :id: "xkcd"
+    :url: "http://xkcd.com"
+    :find:
+        :img: ".html.body1.middleContainer.comic.img.src"
+        :title: ".html.body1.middleContainer.ctitle"
+        :alt: ".html.body1.middleContainer.comic.img.title"
+-
+    :id: "wumo"
+    :url: "http://www.gocomics.com/wumo/"
+    :find:
+        :img: ".html.body1.div9.div4.div1.div.div1.div3.div.a.div.div.picture.img.src"
+
+- 
+    :id: "zits"
+    :url: "https://www.comicskingdom.com/zits/"
+    :find:
+        :img: ".html.body1.div3.scrollArea.div4.div.right-column.div.div.img1.src"
