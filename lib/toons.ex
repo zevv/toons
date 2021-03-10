@@ -2,63 +2,49 @@ defmodule Toons do
 
   require Logger
 
-  def find_prop_id([{"id", v}|_t]) do
-    v
-  end
-
-  def find_prop_id([_h|t]) do
-    find_prop_id(t)
-  end
-
-  def find_prop_id([]) do
-  end
-
-
-  def parse_props(data, prefix, [{k, v} | t]) do
-    data = Map.put(data, prefix <> "." <> k, v)
-    parse_props(data, prefix, t)
-  end
-
-  def parse_props(data, _prefix, []) do
-    data
-  end
-
-
-  def parse(data, prefix, idx, { tag, props, kids} ) do
-
-    id = find_prop_id(props)
-
-    tag = if id do
-      id
-    else
-      tag
+  defp find_id(props) do
+    id = case Enum.find(props, fn {k, _} -> k == "id" end) do
+      {_, id} -> id
+      nil -> nil
     end
-
-    tag = if idx > 0 do
-      tag <> to_string(idx)
-    else
-      tag
+  end
+  
+  defp parse_props(data, prefix, props) do
+    case props do
+      [{k, v} | t] ->
+        data
+        |> Map.put(prefix <> "." <> k, v)
+        |> parse_props(prefix, t)
+      [] ->
+        data
     end
-
-    data = parse_props(data, prefix <> "." <> tag, props)
-    parse(data, prefix <> "." <> tag, 0, kids)
   end
 
-  def parse(data, prefix, idx, [h|t]) do
-    data = parse(data, prefix, idx, h)
-    parse(data, prefix, idx+1, t)
+  defp parse(data, prefix, idx, { tag, props, kids} ) do
+    tag2 = case {find_id(props), idx} do
+      {nil, 0} -> tag
+      {nil, idx} -> tag <> to_string(idx)
+      {id, idx} -> id
+    end
+    data 
+    |> parse_props(prefix <> "." <> tag2, props)
+    |> parse(prefix <> "." <> tag2, 0, kids)
   end
 
-  def parse(data, _prefix, _idx, []) do
-    data
+  defp parse(data, prefix, idx, list) do
+    case list do
+      [] ->
+        data
+      [head | tail] ->
+        data
+        |> parse(prefix, idx, head)
+        |> parse(prefix, idx+1, tail)
+      val ->
+        Map.put(data, prefix, val)
+    end
   end
 
-  def parse(data, prefix, _idx, val) do
-    #IO.inspect({"catch", prefix, idx, val})
-    Map.put(data, prefix, val)
-  end
-
-  def dump_debug(toon, data) do
+  defp dump_debug(toon, data) do
     {:ok, file} = File.open("debug/#{toon.id}", [:write])
     Enum.each(data, fn {k, v} ->
       if is_binary(v) do
@@ -68,8 +54,7 @@ defmodule Toons do
     File.close(file)
   end
 
-
-  def grab(toon) do
+  defp grab(toon) do
 
     Logger.info("Grabbing #{toon.id}")
 
@@ -97,11 +82,11 @@ defmodule Toons do
 
   end
 
-  def grab(toon) do
+  defp grab(toon) do
     Map.put(toon, :data, grab(toon))
   end
 
-  def grab_all(toons) do
+  defp grab_all(toons) do
     toons
     |> Enum.map(&Task.async(fn -> grab(&1) end))
     |> Enum.map(&Task.await(&1))
@@ -114,18 +99,9 @@ defmodule Toons do
         id: "xkcd",
         url: "http://xkcd.com",
         find: %{
-          img: ".html.body1.middleContainer1.comic2.img.src",
-          title: ".html.body1.middleContainer1.ctitle",
-          alt: ".html.body1.middleContainer1.comic2.img.title",
-        }
-      },
-      %{
-        id: "qc",
-        url: "http://questionablecontent.net/",
-        find: %{
-          img: ".html.body1.middleContainer1.comic2.img.src",
-          title: ".html.body1.middleContainer1.ctitle",
-          alt: ".html.body1.middleContainer1.comic2.img.title",
+          img: ".html.body1.middleContainer.comic.img.src",
+          title: ".html.body1.middleContainer.ctitle",
+          alt: ".html.body1.middleContainer.comic.img.title",
         }
       },
       %{
@@ -139,7 +115,7 @@ defmodule Toons do
         id: "zits",
         url: "https://www.comicskingdom.com/zits/",
         find: %{
-          img: ".html.body1.div3.scrollArea3.div4.div.right-column1.div.div.img1.src",
+          img: ".html.body1.div3.scrollArea.div4.div.right-column.div.div.img1.src",
         }
       },
     ]
