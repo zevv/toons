@@ -10,35 +10,31 @@ defmodule Toons do
   end
   
   defp parse_props(data, prefix, props) do
-    case props do
-      [{k, v} | t] ->
-        data
-        |> Map.put(prefix <> "." <> k, v)
-        |> parse_props(prefix, t)
-      [] ->
-        data
-    end
+    props = Map.new(props, fn {k, v} -> { prefix <> "." <> k, v } end)
+    data |> Map.merge(props)
   end
 
-  defp parse(data, prefix, idx, { tag, props, kids} ) do
-    tag = case {find_id(props), idx} do
+  defp get_tag(tag, idx, props) do
+    case {find_id(props), idx} do
       {nil, 0} -> tag
       {nil, idx} -> tag <> to_string(idx)
       {id, _idx} -> id
     end
-    data 
-    |> parse_props(prefix <> "." <> tag, props)
-    |> parse(prefix <> "." <> tag, 0, kids)
   end
 
   defp parse(data, prefix, idx, val) do
     case val do
-      [] ->
-        data
       [head | tail] ->
         data
         |> parse(prefix, idx, head)
         |> parse(prefix, idx+1, tail)
+      [] ->
+        data
+      {tag, props, kids} ->
+        tag = get_tag(tag, idx, props)
+        data 
+        |> parse_props(prefix <> "." <> tag, props)
+        |> parse(prefix <> "." <> tag, 0, kids)
       val ->
         Map.put(data, prefix, val)
     end
@@ -54,26 +50,42 @@ defmodule Toons do
     File.close(file)
   end
 
-  defp grab(toon) do
+  defp grab_image(toon) do
+    url = String.replace_leading(toon.res.img, "//", "http://")
 
-    Logger.info("Grabbing #{toon.id}")
+    case :hackney.get(url, [], "", [follow_redirect: true]) do
+      {:ok, 200, _headers, client} ->
+        {:ok, img} = :hackney.body(client)
+        hash = :crypto.hash(:md5, img) |> Base.encode16()
+        Logger.info("Got #{toon.id} img #{hash}")
+        Map.put(toon, :img_hash, hash)
+      {:error, reason} ->
+        Logger.warn("Error geting #{toon.res.img}: #{reason}")
+        ""
+    end
+  end
+
+  defp grab_html(toon) do
 
     case :hackney.get(toon.url, [], "", [follow_redirect: true]) do
-      {:ok, 200, _, client} ->
+      {:ok, 200, _headers, client} ->
         {:ok, body} = :hackney.body(client)
         {:ok, doc} = Floki.parse_document(body)
         data = parse(%{}, "", 0, doc)
+        Logger.info("Got #{toon.id} html")
 
         dump_debug(toon, data)
 
-        res = Enum.map(toon.find, fn {k, v} ->
-          if data[v] == nil do
+        keys = [:img, :alt, :title] |> Enum.filter(&(toon |> Map.has_key?(&1)))
+
+        toon = Map.put toon, :res, Enum.map(keys, fn k ->
+          if data[toon[k]] == nil do
             Logger.error("Missing #{k} in #{toon.id}")
           end
-          {k, data[v]} end
-        )
+          {k, data[toon[k]]} end
+        ) |> Map.new()
 
-        Map.put(toon, :res, res)
+        grab_image(toon)
 
       {:error, reason } ->
         Logger.warn("Error getting #{toon.id}: #{reason}")
@@ -85,14 +97,21 @@ defmodule Toons do
 
   defp grab_all(toons) do
     toons
-    |> Enum.map(&Task.async(fn -> grab(&1) end))
+    |> Enum.map(&Task.async(fn -> grab_html(&1) end))
     |> Enum.map(&Task.await/1)
   end
-  
+
+
 
   def go do
-    {:ok, toons} = YamlElixir.read_from_file("toons.yaml", atoms: true)
-    grab_all(toons)
+    case YamlElixir.read_from_file("toons.yaml", atoms: true) do
+      {:ok, toons} -> 
+        toons = Enum.map(toons, fn toon -> 
+          toon |> Map.new(fn {k,v} -> {String.to_atom(k), v} end)
+        end)
+        grab_all(toons)
+      {:error, e } -> IO.inspect(e)
+    end
   end
 
 end
