@@ -28,7 +28,7 @@ defmodule Xpeg do
     end
   end
   
-  defp parse(grammar,  p) do
+  defp parse(_grammar,  p) do
     case p do
       v when is_number(v) ->
         { :chr, v }
@@ -37,51 +37,59 @@ defmodule Xpeg do
       [v] ->
         { :chr, v }
       v ->
-        IO.inspect {"Unhandled lit"}
+        IO.inspect {"Unhandled lit", v}
     end
   end
 
   defp error(state) do
-    [back_frame | back_stack] = state.back_stack
-    IO.inspect {"oeps", back_frame } 
-    state = %{state | back_stack: back_stack }
-    match(back_frame.patt, back_frame.s, state)
-  end
-  
-  defp match([], _, state) do
-    IO.inspect {"done"}
+    case state.back_stack do
+      [frame | back_stack] ->
+        IO.inspect {"oeps", frame } 
+        state = %{state | back_stack: back_stack }
+        match(frame.patt, frame.s, state)
+      [] ->
+        throw("Error parsing")
+    end
   end
 
-  defp match(patt, [s | stail], state) do
+  defp match([], _, _) do
+    IO.inspect {"done"}
+  end
+  
+  defp match(patt, s, state) when is_binary(s) do
+    match(patt, to_charlist(s), state)
+  end
+
+  defp match(patt, s, state) do
 
     [inst | ptail] = patt
     IO.inspect {"match", state, inst, s}
 
-    state = case inst do
+    case inst do
 
       { :chr, c } -> 
-        if c == s do
-          match(ptail, stail, state)
+        if c == hd(s) do
+          match(ptail, tl(s), state)
         else
           error(state)
         end
 
       { :choice, offset } ->
-        back_frame = %{
+        frame = %{
           patt: Enum.drop(ptail, offset-1),
-          s: [s | stail],
+          s: s,
         }
         state = %{ state |
-          :back_stack => [ back_frame | state.back_stack ]
+          :back_stack => [ frame | state.back_stack ]
         }
-        match(ptail, [ s | stail], state)
+        match(ptail, s, state)
 
       { :commit, offset } ->
         [_ | back_stack] = state.back_stack
         state = %{ state |
           :back_stack => back_stack
         }
-        match(Enum.drop(ptail, offset), [s | stail], state)
+        match(Enum.drop(ptail, offset), s, state)
     end
   end
 
@@ -100,7 +108,8 @@ defmodule Xpeg do
     state = %{
       back_stack: []
     }
-    match(patt, to_charlist("0cde"), state)
+    match(patt, "0abe", state)
+    match(patt, "0cde", state)
 
   end
 
