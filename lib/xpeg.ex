@@ -56,7 +56,10 @@ defmodule Xpeg do
     IO.inspect {"done"}
   end
   
-  defp match(patt, s, state) when is_binary(s) do
+  defp match(patt, s) do
+    state = %{
+      back_stack: []
+    }
     match(patt, to_charlist(s), state)
   end
 
@@ -97,19 +100,13 @@ defmodule Xpeg do
   def go do
     IO.puts("hello")
 
-    p = quote do
-      '0' * ('a' * 'b' | "cd") * 'e'
-    end
+    p = quote do: '0' * ('a' * 'b' | "cd") * 'e'
 
-    grammar = %{ }
-    patt = parse(grammar, p)
+    patt = parse(%{}, p)
     IO.inspect {:patt, patt}
 
-    state = %{
-      back_stack: []
-    }
-    match(patt, "0abe", state)
-    match(patt, "0cde", state)
+    match(patt, "0abe")
+    match(patt, "0cde")
 
   end
 
