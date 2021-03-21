@@ -26,6 +26,7 @@ defmodule Toons.MixProject do
       {:hackney, git: "git://github.com/benoitc/hackney.git", tag: "master"},
       {:floki, "~> 0.30.0"},
       {:yaml_elixir, "~> 2.6.0"},
+      {:flow, "~> 1.0"},
     ]
   end
 end

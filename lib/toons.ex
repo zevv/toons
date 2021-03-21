@@ -1,19 +1,19 @@
 defmodule Toons do
 
+  @compile if Mix.env == :test, do: :export_all
+
   @hackney_opts [follow_redirect: true, with_body: true]
+  @keys [:img, :alt, :title]
 
   require Logger
 
-  defp find_id(props) do
-    Map.new(props)["id"]
-  end
-  
   defp get_props(data, prefix, props) do
     Enum.into(props, data, fn {k, v} -> { prefix <> "." <> k, v } end)
   end
 
   defp get_tag(tag, idx, props) do
-    case {find_id(props), idx} do
+    { Map.new(props)["id"], idx }
+    |> case do
       {nil, 0} -> tag
       {nil, idx} -> tag <> to_string(idx)
       {id, _} -> id
@@ -29,10 +29,10 @@ defmodule Toons do
       [] ->
         data
       {tag, props, kids} ->
-        tag = get_tag(tag, idx, props)
+        tag = prefix <> "." <> get_tag(tag, idx, props)
         data 
-        |> get_props(prefix <> "." <> tag, props)
-        |> parse(prefix <> "." <> tag, 0, kids)
+        |> get_props(tag, props)
+        |> parse(tag, 0, kids)
       {:comment, _} ->
         data
       val ->
@@ -43,20 +43,22 @@ defmodule Toons do
   defp dump_debug(toon, data) do
     File.write("debug/#{toon.id}",
       Enum.map(data, fn {a, b} -> a <> " = " <> b end) |> Enum.join("\n"))
+    toon
   end
 
   defp grab_image(toon) do
-    url = String.replace_leading(toon.res.img, "//", "http://")
-
-    case :hackney.get(url, [], "", @hackney_opts) do
+    toon.img
+    |> String.replace_leading("//", "http://")
+    |> :hackney.get([], "", @hackney_opts)
+    |> case do
       {:ok, 200, _, img} ->
         hash = :crypto.hash(:md5, img) |> Base.encode16()
         Logger.info("Got #{toon.id} img #{hash}")
         Map.put(toon, :img_hash, hash)
       {:ok, code, _, } ->
-        Logger.warn("Error geting #{toon.res.img}: #{code}")
+        Logger.warn("Error geting #{toon.img}: #{code}")
       {:error, reason} ->
-        Logger.warn("Error geting #{toon.res.img}: #{reason}")
+        Logger.warn("Error geting #{toon.img}: #{reason}")
         ""
     end
   end
@@ -66,50 +68,65 @@ defmodule Toons do
     data = parse(%{}, "", 0, doc)
     Logger.info("Got #{toon.id} html")
 
-    dump_debug(toon, data)
-
-    keys = [:img, :alt, :title] |> Enum.filter(&(toon |> Map.has_key?(&1)))
-
-    res = Enum.map(keys, fn k ->
-      if ! data[toon[k]] do
-        Logger.error("Missing #{k} in #{toon.id}")
-      end
-      {k, data[toon[k]]} end
-    )
-
     toon
-    |> Map.put(:res, Map.new(res))
+    |> dump_debug(data)
+    |> Enum.into(%{}, fn {k, v} ->
+      case { Enum.member?(@keys, k), data[v] } do
+        {:false, _} -> {k, v}
+        {:true, nil} ->
+          Logger.error("Could not find #{k} in #{toon.id}")
+          {k, nil}
+        {:true, d} -> {k, d}
+      end
+    end)
     |> grab_image
   end
 
   defp grab_html(toon) do
-    case :hackney.get(toon.url, [], "", @hackney_opts) do
+    toon.url
+    |> :hackney.get([], "", @hackney_opts)
+    |> case do
       {:ok, 200, _, body} ->
         parse_html(toon, body)
       {:ok, code, _, } ->
         Logger.warn("Error geting #{toon.id}: #{code}")
       {:error, reason } ->
         Logger.warn("Error getting #{toon.id}: #{reason}")
-        Map.put(toon, :error, reason)
     end
   end
 
   defp grab_all(toons) do
     toons
-    |> Enum.map(&Task.async(fn -> grab_html(&1) end))
-    |> Enum.map(fn pid -> Task.await(pid, 10000) end)
+    |> Flow.from_enumerable(stages: 8, max_demand: 1)
+    |> Flow.map(&grab_html/1)
+    |> Flow.run()
   end
 
   def go do
-    case YamlElixir.read_from_file("toons.yaml", atoms: true) do
+    YamlElixir.read_from_file("toons.yaml")
+    |> case do
       {:ok, toons} -> 
-        toons = Enum.map(toons, fn toon -> 
-          toon |> Map.new(fn {k,v} -> {String.to_atom(k), v} end)
-        end)
-        grab_all(toons)
-      {:error, e } -> IO.inspect(e)
+        toons
+        |> Enum.map(&(&1 |> Map.new(fn {k,v} -> {String.to_atom(k), v} end)))
+        |> Enum.map(&(&1 |> Map.put_new(:disabled, false)))
+        |> Enum.filter(fn v -> not v.disabled end)
+        |> grab_all()
+      {:error, e } -> Logger.warn("Error parsing toons.yaml:#{e.line}:#{e.column}: #{e.message}")
     end
   end
+
+
+  def test1 do
+    a = quote do
+      a <- "flop" | "flip" * "flap"
+
+    end
+
+    IO.inspect(a)
+
+
+  end
+
 
 end
 

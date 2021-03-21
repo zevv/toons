@@ -1,24 +1,28 @@
 -
     id: "xkcd"
+    disabled: false
     url: "http://xkcd.com"
     img: ".html.body1.middleContainer.comic.img.src"
     title: ".html.body1.middleContainer.ctitle"
     alt: ".html.body1.middleContainer.comic.img.title"
 -
     id: "wumo"
+    disabled: false
     url: "http://www.gocomics.com/wumo/"
     img: ".html.body1.div9.div4.div1.div.div1.div3.div.a.div.div.picture.img.src"
-
 - 
     id: "zits"
+    disabled: true
     url: "https://www.comicskingdom.com/zits/"
     img: ".html.body1.div3.scrollArea.div4.div.right-column.div.div.img1.src"
 -
     id: "smbc"
+    disabled: false
     url: "http://www.smbc-comics.com/"
     img: ".html.body1.wrapper.mainwrap.comicleft.cc-comicbody.cc-comic.src"
     alt: ".html.body1.wrapper.mainwrap.comicleft.cc-comicbody.cc-comic.title"
 -
     id: "catandgirl"
+    disabled: false
     url: "http://catandgirl.com/"
     img: ".html.body1.section.div1.comic.div.img.src"
