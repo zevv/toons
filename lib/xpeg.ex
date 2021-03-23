@@ -12,11 +12,16 @@ defmodule Xpeg do
   end
 
   defp mk_star(p) do
-    List.flatten [
-      {:choice, length(p)+2, 0}, # <- commit
-      p,
-      {:commit}
-    ] # <- backtrack
+    case p do
+      [set: cs ] ->
+        [{ :span, cs }]
+      _ ->
+        List.flatten [
+          {:choice, length(p)+2, 0}, # <- commit
+          p,
+          {:commit}
+        ] # <- backtrack
+    end
   end
 
   defp mk_not(p) do
@@ -36,6 +41,17 @@ defmodule Xpeg do
     ] # <- backtrack | commit
   end
 
+  defp mk_minus(p1, p2) do
+    case {p1, p2} do
+      {[set: cs1], [set: cs2]} ->
+        # Optimize for the cases of two charsets
+        [set: MapSet.difference(cs1, cs2)]
+      _ ->
+        # Otherwise, emit `!p2 * p1`
+        List.flatten [ mk_not(p2), p1 ]
+    end
+  end
+
   # Transform AST tuples into PEG IR
 
   defp parse({ id, _meta, args }) do
@@ -49,24 +65,25 @@ defmodule Xpeg do
         [{label, parse(patt) ++ [{:return}]}]
       { :<-, [{:__aliases__, _, [label]}, patt] } ->
         [{label, parse(patt) ++ [{:return}]}]
-      # * Concatenation
+      # '*' Concatenation
       { :*, [p1, p2] } ->
         parse(p1) ++ parse(p2)
-      # | Ordered choice
+      # '|' Ordered choice
       { :|, [p1, p2] } ->
-        mk_choice(parse(p1), parse(p2))
-      # * zero-or-more operator
+        mk_choice parse(p1), parse(p2)
+      # '*' zero-or-more operator
       { :star, [p] } ->
-        mk_star(parse(p))
+        mk_star parse(p)
+      # '?' one-or-zero operator
       { :question, [p] } ->
         mk_question(parse(p))
-      # + one-or-more operator
+      # '+' one-or-more operator
       { :+, [p] } ->
         p = parse(p)
         p ++ mk_star(p)
       { :-, [p1, p2] } ->
-        List.flatten [mk_not(parse(p2)), parse(p1)]
-      # ! 'not' operator
+        mk_minus parse(p1), parse(p2)
+      # '!' 'not' operator
       { :!, [p] } ->
         mk_not parse(p)
       # Charset
@@ -141,6 +158,9 @@ defmodule Xpeg do
       result: :unknown
     }
     patt = grammar.rules[grammar.start]
+    if patt == nil do
+      raise "could not find initial rule '#{grammar.start}'"
+    end
     state = match(patt, to_charlist(s), state)
     state.result
   end
@@ -151,7 +171,7 @@ defmodule Xpeg do
   defp match(patt, s, state) do
 
     [inst | ptail] = patt
-    Logger.debug("#{inspect(inst)} - '#{s}'")
+    Logger.debug("#{inspect(inst)} - '#{inspect(s) |> String.slice(1..10)}'")
 
     case inst do
 
@@ -168,6 +188,10 @@ defmodule Xpeg do
         else
           backtrack(state)
         end
+      
+      { :span, cs } ->
+        s = Enum.drop_while(s, fn c -> MapSet.member?(cs, c) end)
+        match(ptail, s, state)
 
       { :choice, off_back, off_commit } ->
         frame = %{
