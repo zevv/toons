@@ -10,18 +10,17 @@ defmodule Xpeg do
       p2 # <- backtrack
     ] # <- commit
   end
+  
+  defp mk_star([set: cs]) do
+    [{:span, cs}]
+  end
 
   defp mk_star(p) do
-    case p do
-      [set: cs ] ->
-        [{ :span, cs }]
-      _ ->
-        List.flatten [
-          {:choice, length(p)+2, 0}, # <- commit
-          p,
-          {:commit}
-        ] # <- backtrack
-    end
+    List.flatten [
+      {:choice, length(p)+2, 0}, # <- commit
+      p,
+      {:commit}
+      ] # <- backtrack
   end
 
   defp mk_not(p) do
@@ -40,16 +39,13 @@ defmodule Xpeg do
       {:commit}, 
     ] # <- backtrack | commit
   end
+  
+  defp mk_minus([set: cs1], [set: cs2]) do
+    [set: MapSet.difference(cs1, cs2)]
+  end
 
   defp mk_minus(p1, p2) do
-    case {p1, p2} do
-      {[set: cs1], [set: cs2]} ->
-        # Optimize for the cases of two charsets
-        [set: MapSet.difference(cs1, cs2)]
-      _ ->
-        # Otherwise, emit `!p2 * p1`
-        List.flatten [ mk_not(p2), p1 ]
-    end
+    List.flatten [ mk_not(p2), p1 ]
   end
 
   # Transform AST tuples into PEG IR
@@ -88,6 +84,7 @@ defmodule Xpeg do
         mk_not parse(p)
       # Charset
       { :{}, p } ->
+        IO.inspect {"set", p}
         [{ :set, parse_set(p) }]
       # Repetition count
       {{:., _, [Access, :get]}, [p, count]} ->
@@ -105,18 +102,12 @@ defmodule Xpeg do
 
   defp parse(p) do
     case p do
-      0 ->
-        [{ :nop }]
-      v when is_atom(v) ->
-        v
-      v when is_number(v) ->
-        [{ :any, v }]
-      v when is_binary(v) ->
-        to_charlist(v) |> Enum.map(fn c -> { :chr, c } end)
-      [v] ->
-        [{ :chr, v }]
-      v ->
-        IO.inspect {"Unhandled lit", v}
+      0 -> [{ :nop }]
+      v when is_atom(v) -> v
+      v when is_number(v) -> [{ :any, v }]
+      v when is_binary(v) -> to_charlist(v) |> Enum.map(fn c -> { :chr, c } end)
+      [v] -> [{ :chr, v }]
+      v -> IO.inspect {"Unhandled lit", v}
     end
   end
 
@@ -157,14 +148,12 @@ defmodule Xpeg do
       ret_stack: [],
       result: :unknown
     }
-    patt = grammar.rules[grammar.start]
-    if patt == nil do
-      raise "could not find initial rule '#{grammar.start}'"
+    state = case grammar.rules[grammar.start] do
+      nil -> raise "could not find initial rule '#{grammar.start}'"
+      patt -> match(patt, to_charlist(s), state)
     end
-    state = match(patt, to_charlist(s), state)
     state.result
   end
-
 
   # Execute PEG IR to match the passed subject charlist
 
@@ -218,10 +207,10 @@ defmodule Xpeg do
 
       { :call, label } ->
         state = %{state | :ret_stack => [ptail | state.ret_stack]}
-        if state.grammar.rules[label] == nil do
-          raise "Calling unknown rule '#{label}'"
+        case state.grammar.rules[label] do
+          nil -> raise "Calling unknown rule '#{label}'"
+          patt -> match(patt, s, state)
         end
-        match(state.grammar.rules[label], s, state)
 
       { :return } ->
         case state.ret_stack do
