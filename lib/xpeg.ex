@@ -3,42 +3,44 @@ defmodule Xpeg do
   require Logger
   
   defp mk_choice(p1, p2) do
-    List.flatten [ { :choice, length(p1) + 2 }, p1, { :commit, length(p2) + 1 }, p2 ]
+    [{:choice, length(p1)+2}] ++ p1 ++ [{:commit, length(p2)+1}] ++ p2 
   end
 
   defp mk_star(p) do
-    List.flatten [ { :choice, length(p) + 2 }, p, { :commit, -length(p) - 1 }, ]
+    [{:choice, length(p)+2}] ++ p ++ [{:commit, -length(p)-1}]
   end
 
   defp mk_not(p) do
-    List.flatten [ { :choice, length(p) + 3 }, p, { :commit, 0 }, { :fail } ]
+    [{:choice, length(p)+3}] ++ p ++ [{:commit, 0}, {:fail}]
   end
 
-  defp parse({ id, meta, args }, grammar) do
-    IO.inspect {"parse", id, args}
+  # Transform AST tuples into PEG IR
+  defp parse({ id, _meta, args }) do
     case { id, args } do
-      { :<-, [{name, _, _}, patt] } ->
-        IO.inspect({"rule", name, patt})
+      { :__block__, ps } ->
+        Enum.map(ps, fn p -> parse(p) end)
+      { :<-, [{label, _, _}, patt] } ->
+        {label, parse(patt) ++ [{:return}]}
       { :*, [p1, p2] } ->
-        List.flatten [parse(p1, grammar), parse(p2, grammar)]
+        parse(p1) ++ parse(p2)
       { :|, [p1, p2] } ->
-        mk_choice(parse(p1, grammar), parse(p2, grammar))
-      { :star, [p] } ->
-        mk_star(parse(p, grammar))
+        mk_choice(parse(p1), parse(p2))
+      { :^, [p] } ->
+        mk_star(parse(p))
       { :+, [p] } ->
-        p = parse(p, grammar)
-        List.flatten [p, mk_star(p)]
+        p = parse(p)
+        p ++ mk_star(p)
       { :{}, p } ->
         [{ :set, parse_set(p) }]
       { :!, [p] } ->
-        mk_not parse(p, grammar)
-      { _, _ } ->
-        IO.inspect({"unhandled", id, meta, args})
+        mk_not parse(p)
+      { label, _ } ->
+        [{:call, label}]
     end
   end
-  
-  defp parse(p, _grammar) do
-    IO.inspect {"lit", p}
+
+  # Transform AST literals into PEG IR
+  defp parse(p) do
     case p do
       0 ->
         [{ :nop }]
@@ -52,7 +54,8 @@ defmodule Xpeg do
         IO.inspect {"Unhandled lit", v}
     end
   end
-  
+
+  # Transform AST character set to PEG IR. `{'x','y','A'-'F','0'}`
   defp parse_set(ps) do
     Enum.map(ps, fn p ->
       case p do
@@ -62,10 +65,6 @@ defmodule Xpeg do
     end)
     |> List.flatten
     |> MapSet.new
-  end
-
-  defp parse(p) do
-    parse(p, %{})
   end
 
   defp error(state) do
@@ -79,20 +78,20 @@ defmodule Xpeg do
     end
   end
   
-  defp match(patt, s) do
+  defp match(grammar, s) do
     state = %{
+      grammar: grammar,
       back_stack: [],
+      call_stack: [],
       result: :unknown
     }
+    patt = grammar.rules[grammar.start]
     state = match(patt, to_charlist(s), state)
     state.result
   end
 
-  defp match([], s, state) do
-    Logger.debug("leftover: #{s}")
-    %{state | :result => :ok}
-  end
 
+  # Execute PEG IR to match the passed subject charlist
   defp match(patt, s, state) do
 
     [inst | ptail] = patt
@@ -119,15 +118,11 @@ defmodule Xpeg do
           patt: Enum.drop(ptail, offset-1),
           s: s,
         }
-        state = %{ state |
-          :back_stack => [ frame | state.back_stack ]
-        }
+        state = %{state | :back_stack => [ frame | state.back_stack ]}
         match(ptail, s, state)
 
       { :commit, offset } ->
-        state = %{ state |
-          :back_stack => tl(state.back_stack)
-        }
+        state = %{state | :back_stack => tl(state.back_stack)}
         Logger.info "commit #{inspect(ptail)}" 
         match(Enum.drop(ptail, offset), s, state)
 
@@ -136,6 +131,19 @@ defmodule Xpeg do
           match(ptail, Enum.drop(s, count), state)
         else
           error(state)
+        end
+
+      { :call, label } ->
+        state = %{state | :call_stack => [ptail | state.call_stack]}
+        match(state.grammar.rules[label], s, state)
+
+      { :return } ->
+        case state.call_stack do
+          [patt | call_stack] ->
+            match(patt, s, %{state | :call_stack => call_stack})
+          [] ->
+            Logger.debug("done, leftover: #{s}")
+            %{state | :result => :ok}
         end
 
       { :nop } ->
@@ -147,12 +155,25 @@ defmodule Xpeg do
     end
   end
 
+  defmacro peg(start, grammar) do
+    [ {:do, v } ] = grammar
+    %{
+      start: start,
+      rules: parse(v),
+    }
+    |> IO.inspect
+    |> Macro.escape
+  end
+  
+  defmacro patt(p) do
+    Macro.escape parse(p)
+  end
+  
 
   def go do
-    IO.puts("hello")
 
     if false do
-      p1 = parse quote do: '0' * ('a' * 'b' | "cd") * 'e'
+      p1 = patt '0' * ('a' * 'b' | "cd") * 'e'
       IO.inspect {:patt, p1}
       IO.inspect match(p1, "0abe") == :ok
       IO.inspect match(p1, "0cde") == :ok
@@ -160,23 +181,34 @@ defmodule Xpeg do
     end
 
     if false do
-      p2 = parse quote do: 6 | 5
+      p2 = patt 6 | 5
       IO.inspect {:patt, p2}
       IO.inspect match(p2, "abcde") == :ok
     end
 
     if false do
-      p3 = parse quote do: +"ab"
-      IO.puts("---")
+      p3 = patt ^"ab"
       IO.inspect {:patt, p3}
       IO.inspect match(p3, "ababc") == :ok
     end
     
-    if true do
+    if false do
       #p3 = parse quote do: {'_','a'-'z','0'-'9'}
-      p3 = parse quote do: "0" * !1
+      p3 = patt "0" * !1
       IO.inspect(p3)
       IO.inspect match(p3, "01")
+    end
+
+
+    if true do
+      p = peg :line do
+        line <- open * name * close * open
+        open <- '('
+        close <- ')'
+        name <- "a"
+      end
+
+      match(p, ")(a)(")
     end
 
   end
