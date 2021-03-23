@@ -17,7 +17,6 @@ defmodule Xpeg do
       p,
       {:commit}
     ] # <- backtrack
-
   end
 
   defp mk_not(p) do
@@ -27,6 +26,14 @@ defmodule Xpeg do
       {:commit},
       {:fail} # <- commit
     ] # <- backtrack
+  end
+
+  defp mk_question(p) do
+    List.flatten [
+      {:choice, length(p)+2, length(p)+2},
+      p,
+      {:commit}, 
+    ] # <- backtrack | commit
   end
 
   # Transform AST tuples into PEG IR
@@ -42,20 +49,24 @@ defmodule Xpeg do
         [{label, parse(patt) ++ [{:return}]}]
       { :<-, [{:__aliases__, _, [label]}, patt] } ->
         [{label, parse(patt) ++ [{:return}]}]
-      # Concatenation
+      # * Concatenation
       { :*, [p1, p2] } ->
         parse(p1) ++ parse(p2)
-      # Ordered choice
+      # | Ordered choice
       { :|, [p1, p2] } ->
         mk_choice(parse(p1), parse(p2))
-      # Star zero-or-more operator
+      # * zero-or-more operator
       { :star, [p] } ->
         mk_star(parse(p))
-      # Plus one-or-more operator
+      { :question, [p] } ->
+        mk_question(parse(p))
+      # + one-or-more operator
       { :+, [p] } ->
         p = parse(p)
         p ++ mk_star(p)
-      # 'not' operator
+      { :-, [p1, p2] } ->
+        List.flatten [mk_not(parse(p2)), parse(p1)]
+      # ! 'not' operator
       { :!, [p] } ->
         mk_not parse(p)
       # Charset
@@ -97,7 +108,8 @@ defmodule Xpeg do
   defp parse_set(ps) do
     Enum.map(ps, fn p ->
       case p do
-        { :-, _, [ [lo], [hi] ] } -> Range.new(lo, hi) |> Enum.into([])
+        { :-, _, [[lo], [hi]] } -> Range.new(lo, hi) |> Enum.into([])
+        { :-, _, [lo, hi] } -> Range.new(lo, hi) |> Enum.into([])
         v -> v
       end
     end)
@@ -111,7 +123,7 @@ defmodule Xpeg do
     Logger.debug("backtrack")
     case state.back_stack do
       [frame | back_stack] ->
-        state = %{state | back_stack: back_stack }
+        state = %{state | back_stack: back_stack, ret_stack: frame.ret_stack }
         #IO.inspect {"error", frame.s, state}
         match(frame.patt_back, frame.s, state)
       [] ->
@@ -125,7 +137,7 @@ defmodule Xpeg do
     state = %{
       grammar: grammar,
       back_stack: [],
-      call_stack: [],
+      ret_stack: [],
       result: :unknown
     }
     patt = grammar.rules[grammar.start]
@@ -144,7 +156,7 @@ defmodule Xpeg do
     case inst do
 
       { :chr, c } -> 
-        if c == hd(s) do
+        if length(s) > 0 and c == hd(s) do
           match(ptail, tl(s), state)
         else
           backtrack(state)
@@ -161,15 +173,16 @@ defmodule Xpeg do
         frame = %{
           patt_back: Enum.drop(patt, off_back),
           patt_commit: Enum.drop(patt, off_commit),
+          ret_stack: state.ret_stack,
           s: s,
         }
         state = %{state | :back_stack => [ frame | state.back_stack ]}
         match(ptail, s, state)
 
-      { :commit } ->A
+      { :commit } ->
         [frame | back_stack] = state.back_stack
         state = %{state | :back_stack => back_stack}
-        Logger.debug "commit #{inspect(frame)}" 
+        #Logger.debug "commit #{inspect(frame)}" 
         match(frame.patt_commit, s, state)
 
       { :any, count } ->
@@ -180,13 +193,17 @@ defmodule Xpeg do
         end
 
       { :call, label } ->
-        state = %{state | :call_stack => [ptail | state.call_stack]}
+        state = %{state | :ret_stack => [ptail | state.ret_stack]}
+        if state.grammar.rules[label] == nil do
+          raise "Calling unknown rule '#{label}'"
+        end
         match(state.grammar.rules[label], s, state)
 
       { :return } ->
-        case state.call_stack do
-          [patt | call_stack] ->
-            match(patt, s, %{state | :call_stack => call_stack})
+        case state.ret_stack do
+          [patt | ret_stack] ->
+            #Logger.debug "return #{inspect(patt)}"
+            match(patt, s, %{state | :ret_stack => ret_stack})
           [] ->
             Logger.debug("done, leftover: #{s}")
             %{state | :result => :ok}
@@ -227,34 +244,34 @@ defmodule Xpeg do
         S              <- star({' ','\t','\r','\n'})
         True           <- "true"
         False          <- "false"
-        null           <- "null"
+        Null           <- "null"
 
-        #Xdigit         <- {'0'-'9','a'-'f','A'-'F'}
-        #UnicodeEscape  <- 'u' * Xdigit[4]
+        Xdigit         <- {'0'-'9','a'-'f','A'-'F'}
+        UnicodeEscape  <- 'u' * Xdigit[4]
        
-        #Escape         <- '\\' * ({ '"', '\\', '/', 'b', 'f', 'n', 'r', 't' } | UnicodeEscape)
-        #StringBody     <- *Escape * *( +( {'\x20'..'\xff'} - {'"'} - {'\\'}) * *Escape) 
-        #String         <- '"' * StringBody * '"'
+        Escape         <- '\\' * ({ '"', '\\', '/', 'b', 'f', 'n', 'r', 't' } | UnicodeEscape)
+        StringBody     <- star(Escape) * star( +( {32-255} - {'"'} - {'\\'}) * star(Escape) )
+        String         <- '"' * StringBody * '"'
 
-        #Minus          <- '-'
-        #IntPart        <- '0' | {'1'..'9'} * *{'0'..'9'}
-        #FractPart      <- "." * +{'0'..'9'}
-        #ExpPart        <- ( 'e' | 'E' ) * ?( '+' | '-' ) * +{'0'..'9'}
-        #Number         <- ?Minus * IntPart * ?FractPart * ?ExpPart
+        Minus          <- '-'
+        IntPart        <- '0' | {'1'-'9'} * star{'0'-'9'}
+        FractPart      <- "." * +{'0'-'9'}
+        ExpPart        <- ( 'e' | 'E' ) * question( '+' | '-' ) * +{'0'-'9'}
+        Number         <- question(Minus) * IntPart * question(FractPart) * question(ExpPart)
 
-        #DOC            <- Value * !1
-        #ObjPair        <- S * String * S * ":" * Value
-        #Object         <- '{' * ( ObjPair * *( "," * ObjPair ) | S ) * "}"
-        #Array          <- "[" * ( Value * *( "," * Value ) | S ) * "]"
-        #Value          <- S * ( Number | String | Object | Array | True | False | Null ) * S
-        Value          <- S * ( True | False | Null ) * S
+        DOC            <- Value * !1
+        ObjPair        <- S * String * S * ":" * Value
+        Object         <- '{' * ( ObjPair * star( "," * ObjPair ) | S ) * "}"
+        Array          <- "[" * ( Value * star( "," * Value ) | S ) * "]"
+        Value          <- S * ( Number | String | Object | Array | True | False | Null ) * S
 
-        JSON <- 'a' * !1
-        #JSON           <- Value * !1
+        JSON           <- Value * !1
 
       end
 
-      match(p, "a")
+      match(p, """
+        [ "look", "at", "this", { "thing": "parseing", "json": 3.1415 }, true, false ]
+      """)
     end
 
   end
