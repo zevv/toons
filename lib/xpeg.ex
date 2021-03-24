@@ -2,19 +2,65 @@ defmodule Xpeg do
   
   require Logger
 
+  @type inst :: { :nop } |
+                { :any, integer } |
+                { :chr, integer } |
+                { :set, charset } |
+                { :span, charset } |
+                { :choice, integer, integer } |
+                { :commit } |
+                { :call, atom } |
+                { :capopen } |
+                { :capclose } |
+                { :return } |
+                { :fail } 
+  
+  @type charset :: MapSet.t(char)
+
+  @type patt :: list(inst)
+
+  @type astnode :: {atom, list(), list()}
+
+  @type grammar :: %{
+    start: atom,
+    rules: keyword(list(inst)),
+  }
+
+  @type subject :: string
+
+  @type captures :: list(string)
+
+  @type back_frame :: %{
+    patt_back: patt,
+    patt_commit: patt,
+    ret_stack: list(patt),
+    s: subject,
+  }
+
+  @type matchstate :: %{
+    grammar: grammar,
+    back_stack: list(back_frame),
+    ret_stack: list(patt),
+    cap_stack: list({atom, integer, subject}),
+    result: :unknown | :ok | :error,
+  }
+
   # Emit a choice/commit pair around pattern p; off_back and off_commit are the
   # offsets to the backtrack and commit targets, relative to the commit
   # instruction
+  @spec choice_commit(patt, integer, integer) :: patt
   defp choice_commit(p, off_commit, off_back) do
-    [{:choice, off_back, off_commit}] ++ p ++ [{:commit}]
+    [{:choice, off_back, off_commit}] ++ p ++ [{:cammit}]
   end
 
   # Generic ordered choice
+  @spec mk_choice(patt, patt) :: patt
   defp mk_choice(p1, p2) do
     choice_commit(p1, length(p1)+length(p2)+2, length(p1)+2) ++ p2
   end
 
   # kleene-star-operator for sets make a :span
+  @spec mk_star(patt) :: patt
   defp mk_star([set: cs]) do
     [{:span, cs}]
   end
@@ -25,16 +71,19 @@ defmodule Xpeg do
   end
 
   # Generic ! 'not' predicate
+  @spec mk_not(patt) :: patt
   defp mk_not(p) do
     choice_commit(p, length(p)+2, length(p)+3) ++ [{:fail}]
   end
 
   # Generic optional
+  @spec mk_optional(patt) :: patt
   defp mk_optional(p) do
     choice_commit(p, length(p)+2, length(p)+2)
   end
 
   # Minus for sets is the difference between sets
+  @spec mk_minus(patt, patt) :: patt
   defp mk_minus([set: cs1], [set: cs2]) do
     [set: MapSet.difference(cs1, cs2)]
   end
@@ -45,6 +94,7 @@ defmodule Xpeg do
   end
   
   # Transform AST tuples into PEG IR
+  @spec parse(astnode) :: patt
   defp parse({ id, _meta, args }) do
     #IO.inspect {"parse", id, args }
     case { id, args } do
@@ -106,6 +156,7 @@ defmodule Xpeg do
   end
 
   # Transform AST literals into PEG IR
+  @spec parse(atom | boolean | integer) :: patt
   defp parse(p) do
     case p do
       0 -> [{ :nop }]
@@ -118,6 +169,7 @@ defmodule Xpeg do
   end
 
   # Transform AST character set to PEG IR. `{'x','y','A'-'F','0'}`
+  @spec parse_set(astnode) :: MapSet.t(char)
   defp parse_set(ps) do
     Enum.map(ps, fn p ->
       case p do
@@ -131,6 +183,7 @@ defmodule Xpeg do
   end
   
   # PEG compilation macro: takes a grammar description in Elixir-AST
+  @spec peg(string, list()) :: astnode
   defmacro peg(start, [{:do, v}]) do
     %{
       start: start,
@@ -143,6 +196,7 @@ defmodule Xpeg do
 
 
   # Error handling: backtrack if possible, error out otherwise
+  @spec backtrack(matchstate) :: matchstate
   defp backtrack(state) do
     Logger.debug("<<<")
     case state.back_stack do
@@ -155,6 +209,7 @@ defmodule Xpeg do
   end
 
   # Execute PEG IR to match the passed subject charlist
+  @spec match(patt, subject, matchstate) :: matchstate
   defp match([inst|ptail]=patt, s, state) do
 
     ds = s |> inspect |> String.slice(1, 15) |> String.pad_trailing(15)
@@ -237,6 +292,7 @@ defmodule Xpeg do
 
 
   # Match a subject against a grammar
+  @spec match(grammar, String.t) :: captures
   defp match(grammar, s) do
     state = %{
       grammar: grammar,
@@ -253,6 +309,7 @@ defmodule Xpeg do
   end
 
   # Flatten the cap stack and collect the captures
+  @spec collect_captures(matchstate) :: captures
   def collect_captures(state) do
     state.cap_stack
     |> Enum.reverse
@@ -260,10 +317,12 @@ defmodule Xpeg do
       case { frame, acc } do
         {{:open, _, _ }, _} ->
           {[frame | acc], caps}
-        {{:close, oc, _sc }, [{:open, oo, so} | t]} ->
+        {{:close, oc, _ }, [{:open, oo, so} | t]} ->
           {t, [Enum.take(so, oo-oc) | caps]}
       end
     end)
+    |> elem(1)
+    |> Enum.reverse
   end
 
   def go do
