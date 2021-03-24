@@ -1,7 +1,7 @@
 defmodule Xpeg do
   
   require Logger
-
+  
   @type inst :: { :nop } |
                 { :any, integer } |
                 { :chr, integer } |
@@ -19,16 +19,16 @@ defmodule Xpeg do
 
   @type patt :: list(inst)
 
-  @type astnode :: {atom, list(), list()}
+  @type astnode :: {any, list(), list()}
 
   @type grammar :: %{
     start: atom,
     rules: keyword(list(inst)),
   }
 
-  @type subject :: string
+  @type subject :: charlist
 
-  @type captures :: list(string)
+  @type captures :: list(String.t)
 
   @type back_frame :: %{
     patt_back: patt,
@@ -50,7 +50,7 @@ defmodule Xpeg do
   # instruction
   @spec choice_commit(patt, integer, integer) :: patt
   defp choice_commit(p, off_commit, off_back) do
-    [{:choice, off_back, off_commit}] ++ p ++ [{:cammit}]
+    [{:choice, off_back, off_commit}] ++ p ++ [{:commit}]
   end
 
   # Generic ordered choice
@@ -141,7 +141,7 @@ defmodule Xpeg do
 
       # Repetition count
       {{:., _, [Access, :get]}, [p, count]} ->
-        List.duplicate parse(p), count
+        List.flatten List.duplicate(parse(p), count)
 
       # Call
       { label, nil }          ->
@@ -183,7 +183,7 @@ defmodule Xpeg do
   end
   
   # PEG compilation macro: takes a grammar description in Elixir-AST
-  @spec peg(string, list()) :: astnode
+  @spec peg(String.t, list()) :: astnode
   defmacro peg(start, [{:do, v}]) do
     %{
       start: start,
@@ -330,10 +330,16 @@ defmodule Xpeg do
     p = peg :flop do
       word <- cap(star({'a'-'z'}))
       flop <- cap(word * star(',' * word))
+      UnicodeEscape  <-  Xdigit[4]
+
     end
 
     match(p, "one,two,three")
 
+  end
+
+  def test do
+    parse {{:., [], [Access, :get]}, [], ["a", 3]}
   end
 
   #def gojs do
