@@ -27,6 +27,7 @@ defmodule Toons.MixProject do
       {:floki, "~> 0.30.0"},
       {:yaml_elixir, "~> 2.6.0"},
       {:flow, "~> 1.0"},
+      {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
     ]
   end
 end

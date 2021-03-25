@@ -91,7 +91,7 @@ defmodule Xpeg do
 
       # Repetition count
       {{:., _, [Access, :get]}, [p, count]} ->
-        List.duplicate parse(p), count
+        List.duplicate(parse(p), count) |> List.flatten
 
       # Call
       { label, nil }          ->
