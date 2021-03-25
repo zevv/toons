@@ -266,7 +266,9 @@ defmodule Xpeg do
     end)
   end
 
-  def go do
+
+
+  def test_go do
 
     p = peg :flop do
       word <- cap(star({'a'-'z'}))
@@ -277,43 +279,44 @@ defmodule Xpeg do
 
   end
 
-  #def gojs do
 
-  #  p = peg :JSON do
+  def test_json do
 
-  #    S              <- star({' ','\t','\r','\n'})
-  #    True           <- "true"
-  #    False          <- "false"
-  #    Null           <- "null"
+    p = peg :JSON do
 
-  #    Xdigit         <- {'0'-'9','a'-'f','A'-'F'}
-  #    UnicodeEscape  <- 'u' * Xdigit[4]
+      S              <- star({' ','\t','\r','\n'})
+      True           <- "true"
+      False          <- "false"
+      Null           <- "null"
 
-  #    Escape         <- '\\' * ({ '"', '\\', '/', 'b', 'f', 'n', 'r', 't' } | UnicodeEscape)
-  #    StringBody     <- star(Escape) * star( +( {32-255} - {'"'} - {'\\'}) * star(Escape) )
-  #    String         <- '"' * StringBody * '"'
+      Xdigit         <- {'0'-'9','a'-'f','A'-'F'}
+      UnicodeEscape  <- 'u' * Xdigit[4]
 
-  #    Minus          <- '-'
-  #    IntPart        <- '0' | {'1'-'9'} * star{'0'-'9'}
-  #    FractPart      <- "." * +{'0'-'9'}
-  #    ExpPart        <- ( 'e' | 'E' ) * question( '+' | '-' ) * +{'0'-'9'}
-  #    Number         <- question(Minus) * IntPart * question(FractPart) * question(ExpPart)
+      Escape         <- '\\' * ({ '"', '\\', '/', 'b', 'f', 'n', 'r', 't' } | UnicodeEscape)
+      StringBody     <- star(Escape) * star( +( {32-255} - {'"'} - {'\\'}) * star(Escape) )
+      String         <- '"' * StringBody * '"'
 
-  #    DOC            <- Value * !1
-  #    ObjPair        <- S * String * S * ":" * Value
-  #    Object         <- '{' * ( ObjPair * star( "," * ObjPair ) | S ) * "}"
-  #    Array          <- "[" * ( Value * star( "," * Value ) | S ) * "]"
-  #    Value          <- S * ( Number | String | Object | Array | True | False | Null ) * S
+      Minus          <- '-'
+      IntPart        <- '0' | {'1'-'9'} * star{'0'-'9'}
+      FractPart      <- "." * +{'0'-'9'}
+      ExpPart        <- ( 'e' | 'E' ) * question( '+' | '-' ) * +{'0'-'9'}
+      Number         <- question(Minus) * IntPart * question(FractPart) * question(ExpPart)
 
-  #    JSON           <- Value * !1
+      DOC            <- Value * !1
+      ObjPair        <- S * String * S * ":" * Value
+      Object         <- '{' * ( ObjPair * star( "," * ObjPair ) | S ) * "}"
+      Array          <- "[" * ( Value * star( "," * Value ) | S ) * "]"
+      Value          <- S * ( Number | String | Object | Array | True | False | Null ) * S
 
-  #  end
+      JSON           <- Value * !1
 
-  #  match(p, """
-  #    [ "look", "at", "this", { "thing": "parseing", "json": 3.1415 }, true, false ]
-  #  """)
+    end
 
-  #end
+    match(p, """
+      [ "look", "at", "this", { "thing": "parseing", "json": 3.1415 }, true, false ]
+    """)
+
+  end
 
 end
 
