@@ -28,6 +28,7 @@ defmodule Toons.MixProject do
       {:yaml_elixir, "~> 2.6.0"},
       {:flow, "~> 1.0"},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
+      {:exprof, "~> 0.2.0"},
     ]
   end
 end

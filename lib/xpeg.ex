@@ -1,3 +1,4 @@
+
 defmodule Xpeg do
   
   require Logger
@@ -51,13 +52,16 @@ defmodule Xpeg do
 
       # List of named rules
       { :__block__, ps } ->
-        Enum.map(ps, &parse/1) |> List.flatten
+        Enum.reduce(ps, %{}, fn rule, acc ->
+          {name, patt} = parse(rule)
+          Map.put(acc, name, patt)
+        end)
 
       # Named rule
-      { :<-, [{label, _, nil}, patt] }            ->
-        [{label, parse(patt) ++ [{:return}]}]
+      { :<-, [{label, _, nil}, patt] } ->
+        {label, parse(patt) ++ [{:return}]}
       { :<-, [{:__aliases__, _, [label]}, patt] } ->
-        [{label, parse(patt) ++ [{:return}]}]
+        {label, parse(patt) ++ [{:return}]}
 
       # '*' Concatenation
       { :*, [p1, p2] } ->
@@ -136,7 +140,7 @@ defmodule Xpeg do
       start: start,
       rules: parse(v),
     }
-    |> IO.inspect
+    #|> IO.inspect
     |> Macro.escape
   end
 
@@ -144,7 +148,7 @@ defmodule Xpeg do
 
   # Error handling: backtrack if possible, error out otherwise
   defp backtrack(state) do
-    Logger.debug("<<<")
+    #Logger.debug("<<<")
     case state.back_stack do
       [frame | back_stack] ->
         state = %{state | back_stack: back_stack, ret_stack: frame.ret_stack }
@@ -157,9 +161,9 @@ defmodule Xpeg do
   # Execute PEG IR to match the passed subject charlist
   defp match([inst|ptail]=patt, s, state) do
 
-    ds = s |> inspect |> String.slice(1, 15) |> String.pad_trailing(15)
-    di = inst |> Tuple.to_list |> Enum.map(&inspect/1) |> Enum.join(" ")
-    Logger.debug("#{ds}|#{di}")
+    #ds = s |> inspect |> String.slice(1, 15) |> String.pad_trailing(15)
+    #di = inst |> Tuple.to_list |> Enum.map(&inspect/1) |> Enum.join(" ")
+    #Logger.debug("#{ds}|#{di}")
 
     case inst do
 
@@ -174,14 +178,14 @@ defmodule Xpeg do
         end
 
       { :chr, c } ->
-        if length(s) > 0 and c == hd(s) do
+        if s != [] and c == hd(s) do
           match(ptail, tl(s), state)
         else
           backtrack(state)
         end
 
       { :set, cs } ->
-        if length(s) > 0 and MapSet.member?(cs, hd(s)) do
+        if s != [] and MapSet.member?(cs, hd(s)) do
           match(ptail, tl(s), state)
         else
           backtrack(state)
@@ -243,6 +247,7 @@ defmodule Xpeg do
       back_stack: [],
       ret_stack: [],
       cap_stack: [],
+      captures: [],
       result: :unknown
     }
     case grammar.rules[grammar.start] do
@@ -254,7 +259,7 @@ defmodule Xpeg do
 
   # Flatten the cap stack and collect the captures
   def collect_captures(state) do
-    state.cap_stack
+    captures = state.cap_stack
     |> Enum.reverse
     |> Enum.reduce({[], []}, fn frame, {acc, caps} ->
       case { frame, acc } do
@@ -264,6 +269,10 @@ defmodule Xpeg do
           {t, [Enum.take(so, oo-oc) | caps]}
       end
     end)
+    |> elem(1)
+    |> Enum.reverse
+
+    %{state | captures: captures}
   end
 
 
@@ -312,10 +321,24 @@ defmodule Xpeg do
 
     end
 
-    match(p, """
+    s = """
       [ "look", "at", "this", { "thing": "parseing", "json": 3.1415 }, true, false ]
-    """)
+    """
+    
+    List.duplicate(s, 1000000)
+    |> Flow.from_enumerable()
+    |> Flow.map(fn s -> match(p, s).result end)
+    |> Enum.to_list()
+    
+  end
 
+  def hop do
+    t1 = System.monotonic_time(:milliseconds)
+    #profile do
+      test_json() |> IO.inspect
+    #end
+    t2 = System.monotonic_time(:milliseconds)
+    t2 - t1
   end
 
 end
